@@ -3,3 +3,8 @@ volumes/storage
 .env
 test.http
 docker-compose.override.yml
+
+portainer-data/
+nginx-data/
+nginx-letsencrypt/
+

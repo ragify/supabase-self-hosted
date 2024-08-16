@@ -5,39 +5,9 @@
 #   Destroy:        docker compose -f docker-compose.yml -f ./dev/docker-compose.dev.yml down -v --remove-orphans
 
 name: supabase
+version: "3.8"
 
 services:
-
-  #authelia:
-  #  container_name: authelia
-  #  image: authelia/authelia
-  #  restart: unless-stopped
-  #  expose:
-  #    - 9091
-  #  volumes:
-  #    - ./authelia/config:/config
-  #  environment:
-  #    TZ: 'Europe/Berlin'
-
-  nginx:
-    image: 'jc21/nginx-proxy-manager:latest'
-    restart: unless-stopped
-    ports:
-      # These ports are in format <host-port>:<container-port>
-      - '80:80' # Public HTTP Port
-      - '443:443' # Public HTTPS Port
-      - '81:81' # Admin Web Port
-      - '5432:5432'
-    volumes:
-      - ./nginx-data:/data
-      - ./nginx-letsencrypt:/etc/letsencrypt
-      - ./nginx-snippets:/snippets:ro
-    environment:
-      TZ: 'Europe/Berlin'
-    networks:
-      - internal
-      - proxy-network
-
   studio:
     container_name: supabase-studio
     image: supabase/studio:20240729-ce42139
@@ -76,8 +46,6 @@ services:
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
       # Uncomment to use Big Query backend for analytics
       # NEXT_ANALYTICS_BACKEND_PROVIDER: bigquery
-    networks:
-      - internal
 
   kong:
     container_name: supabase-kong
@@ -85,9 +53,9 @@ services:
     restart: unless-stopped
     # https://unix.stackexchange.com/a/294837
     entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
-    #ports:
-    #  - ${KONG_HTTP_PORT}:8000/tcp
-    #  - ${KONG_HTTPS_PORT}:8443/tcp
+    ports:
+      - ${KONG_HTTP_PORT}:8000/tcp
+      - ${KONG_HTTPS_PORT}:8443/tcp
     depends_on:
       analytics:
         condition: service_healthy
@@ -101,13 +69,11 @@ services:
       KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
-      #DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
-      #DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
     volumes:
       # https://github.com/supabase/supabase/issues/12661
       - ./volumes/api/kong.yml:/home/kong/temp.yml:ro
-    networks:
-      - internal
 
   auth:
     container_name: supabase-auth
@@ -178,8 +144,9 @@ services:
 
       # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_ENABLED="true"
       # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_URI="pg-functions://postgres/public/password_verification_attempt"
-    networks:
-      - internal
+
+
+
 
   rest:
     container_name: supabase-rest
@@ -200,8 +167,6 @@ services:
       PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
     command: "postgrest"
-    networks:
-      - internal
 
   realtime:
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
@@ -246,8 +211,6 @@ services:
       RLIMIT_NOFILE: "10000"
       APP_NAME: realtime
       SEED_SELF_HOST: true
-    networks:
-      - internal
 
   # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
   storage:
@@ -282,22 +245,16 @@ services:
       PGRST_JWT_SECRET: ${JWT_SECRET}
       DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       FILE_SIZE_LIMIT: 52428800
-      STORAGE_BACKEND: s3
-      GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET}
-      GLOBAL_S3_ENDPOINT: ${GLOBAL_S3_ENDPOINT}
-      GLOBAL_S3_PROTOCOL: ${GLOBAL_S3_PROTOCOL}
-      REGION: ${AWS_DEFAULT_REGION}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
-      #this next one seems important for minio
-      GLOBAL_S3_FORCE_PATH_STYLE: true
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      # TODO: https://github.com/supabase/storage-api/issues/55
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
       ENABLE_IMAGE_TRANSFORMATION: "true"
       IMGPROXY_URL: http://imgproxy:5001
     volumes:
       - ./volumes/storage:/var/lib/storage:z
-    networks:
-      - internal
 
   imgproxy:
     container_name: supabase-imgproxy
@@ -314,8 +271,6 @@ services:
       IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
     volumes:
       - ./volumes/storage:/var/lib/storage:z
-    networks:
-      - internal
 
   meta:
     container_name: supabase-meta
@@ -334,8 +289,6 @@ services:
       PG_META_DB_NAME: ${POSTGRES_DB}
       PG_META_DB_USER: supabase_admin
       PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
-    networks:
-      - internal
 
   functions:
     container_name: supabase-edge-functions
@@ -358,8 +311,6 @@ services:
       - start
       - --main-service
       - /home/deno/functions/main
-    networks:
-      - internal
 
   analytics:
     container_name: supabase-analytics
@@ -402,8 +353,6 @@ services:
       # GOOGLE_PROJECT_NUMBER: ${GOOGLE_PROJECT_NUMBER}
     ports:
       - 4000:4000
-    networks:
-      - internal
 
   # Comment out everything below this point if you are using an external Postgres database
   db:
@@ -424,11 +373,9 @@ services:
       - -c
       - log_min_messages=fatal # prevents Realtime polling queries from appearing in logs
     restart: unless-stopped
-    #ports:
-    #  # Pass down internal port because it's set dynamically by other services
-    #  - ${POSTGRES_PORT}:${POSTGRES_PORT}
-    expose:
-      - ${POSTGRES_PORT}
+    ports:
+      # Pass down internal port because it's set dynamically by other services
+      - ${POSTGRES_PORT}:${POSTGRES_PORT}
     environment:
       POSTGRES_HOST: /var/run/postgresql
       PGPORT: ${POSTGRES_PORT}
@@ -453,8 +400,6 @@ services:
       - ./volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
       # Use named volume to persist pgsodium decryption key between restarts
       - db-config:/etc/postgresql-custom
-    networks:
-      - internal
 
   vector:
     container_name: supabase-vector
@@ -479,15 +424,6 @@ services:
     environment:
       LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
     command: [ "--config", "etc/vector/vector.yml" ]
-    networks:
-      - internal
 
 volumes:
   db-config:
-
-networks:
-  proxy-network:
-    name: proxy-network
-  internal:
-    name: internal
-    external: false
